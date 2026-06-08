@@ -56,7 +56,7 @@ def compare(
 ) -> dict:
     client = OpenAI(
         base_url=config["lm_studio_url"],
-        api_key="lm-studio",
+        api_key=config.get("lm_studio_api_key", "lm-studio"),
     )
     model = config["lm_studio_model"]
     max_chars = config.get("max_chars_per_doc", 1500)

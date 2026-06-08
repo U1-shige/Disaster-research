@@ -5,6 +5,7 @@ base_file_keywords:
   - "変更"
 lm_studio_model: "Qwen2.5-3B-Instruct"   # LM Studio の「Model」タブに表示される名前
 lm_studio_url: "http://localhost:1234/v1"
+lm_studio_api_key: "lm-studio"  # LM Studio の API キーに変更してください
 output_directory: "./output"
 output_format: "both"        # csv / json / both
 text_char_threshold: 100     # OCR判定の閾値（1ページ平均文字数）

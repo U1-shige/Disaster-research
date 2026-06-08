@@ -63,8 +63,9 @@ def _get_dll():
     sys.exit(1)
 
 
-def _enc(s: str) -> bytes:
-    return s.encode("cp932")
+def _wstr(s: str) -> ctypes.c_wchar_p:
+    """Unicode文字列ポインタ（XDWAPI はワイド文字列を使用）"""
+    return ctypes.c_wchar_p(s)
 
 
 def _check(ret: int, func_name: str) -> None:
@@ -83,21 +84,21 @@ def create_binder_xdwapi(binder_path: str, doc_paths: list[str]) -> None:
     if os.path.exists(binder_path):
         os.remove(binder_path)
 
-    # 1. 空のバインダーを作成
-    _check(dll.XDW_CreateBinder(_enc(binder_path), None), "XDW_CreateBinder")
+    # 1. 空のバインダーを作成（Unicode文字列で渡す）
+    _check(dll.XDW_CreateBinder(_wstr(binder_path), None), "XDW_CreateBinder")
 
     # 2. 書き込みモードで開く
     handle = ctypes.c_void_p()
     mode = XDW_OPEN_MODE(nSize=ctypes.sizeof(XDW_OPEN_MODE), nOption=1)
     _check(
-        dll.XDW_OpenDocumentHandle(_enc(binder_path), ctypes.byref(handle), ctypes.byref(mode)),
+        dll.XDW_OpenDocumentHandle(_wstr(binder_path), ctypes.byref(handle), ctypes.byref(mode)),
         "XDW_OpenDocumentHandle",
     )
 
     # 3. ドキュメントを順番に挿入
     for i, doc_path in enumerate(doc_paths):
         _check(
-            dll.XDW_InsertDocumentToBinder(handle, i, _enc(doc_path), None),
+            dll.XDW_InsertDocumentToBinder(handle, i, _wstr(doc_path), None),
             f"XDW_InsertDocumentToBinder [{os.path.basename(doc_path)}]",
         )
 

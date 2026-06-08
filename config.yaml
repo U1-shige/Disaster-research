@@ -9,3 +9,5 @@ output_directory: "./output"
 output_format: "both"        # csv / json / both
 text_char_threshold: 100     # OCR判定の閾値（1ページ平均文字数）
 ocr_language: "jpn+jpn_vert"
+max_chars_per_doc: 1500   # 4096トークンのモデルで安全な文字数。8192なら3000に増やせる
+tesseract_path: "C:/Program Files/Tesseract-OCR/tesseract.exe"

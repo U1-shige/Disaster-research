@@ -29,16 +29,17 @@ SUMMARY_PROMPT = """以下の文書を3〜5文で簡潔に要約してくださ�
 要約:"""
 
 
-def _truncate_or_summarize(client, model: str, text: str, max_chars: int = 6000) -> str:
+def _truncate_or_summarize(client, model: str, text: str, max_chars: int) -> str:
     if len(text) <= max_chars:
         return text
-    prompt = SUMMARY_PROMPT.format(text=text[:10000])
+    prompt = SUMMARY_PROMPT.format(text=text[:max_chars * 2])
     resp = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
     )
-    return resp.choices[0].message.content.strip()
+    result = resp.choices[0].message.content.strip()
+    return result[:max_chars]
 
 
 def _parse_json(raw: str) -> dict:
@@ -58,11 +59,10 @@ def compare(
         api_key="lm-studio",
     )
     model = config["lm_studio_model"]
+    max_chars = config.get("max_chars_per_doc", 1500)
 
-    # Summarize long documents before comparison
-    if len(base_text) + len(compare_text) > 12000:
-        base_text = _truncate_or_summarize(client, model, base_text)
-        compare_text = _truncate_or_summarize(client, model, compare_text)
+    base_text = _truncate_or_summarize(client, model, base_text, max_chars)
+    compare_text = _truncate_or_summarize(client, model, compare_text, max_chars)
 
     prompt = PROMPT_TEMPLATE.format(base_text=base_text, compare_text=compare_text)
     messages = [{"role": "user", "content": prompt}]

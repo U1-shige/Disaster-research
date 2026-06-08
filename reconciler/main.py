@@ -22,6 +22,8 @@ def check_lm_studio(url: str) -> None:
     import urllib.error
     try:
         urllib.request.urlopen(f"{url}/models", timeout=5)
+    except urllib.error.HTTPError:
+        pass  # LM Studio が応答していればHTTPエラーでも接続OK
     except urllib.error.URLError:
         print(
             "[ERROR] LM Studio に接続できません。\n"

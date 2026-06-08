@@ -1,28 +1,120 @@
 """
-DocuWorks バインダー作成スクリプト
-
-reconciler の出力CSVをもとに、各フォルダのPDFをDocuWorksバインダー(.xbd)にまとめる。
-設計変更を含む基準ファイルを1番目に配置する。
+DocuWorks バインダー作成スクリプト (XDWAPI直接呼び出し版)
 
 必要なもの:
-  - DocuWorks がPCにインストールされていること
-  - pip install xdwlib
+  - DocuWorks 9.1 がPCにインストールされていること (XDWAPI.DLL)
+  - 追加パッケージ不要 (ctypes は Python 標準ライブラリ)
+
+使い方:
+  python bundler.py                    # 全フォルダ処理
+  python bundler.py --folder フォルダ名  # 1フォルダのみ（テスト用）
+  python bundler.py --csv result.csv   # CSVファイルを指定
 """
 
 import argparse
 import csv
+import ctypes
+import ctypes.wintypes
 import os
 import sys
 
 import yaml
 
 
-def load_config(path):
+# ---------------------------------------------------------------------------
+# XDWAPI wrapper
+# ---------------------------------------------------------------------------
+
+XDW_E_SUCCESS = 0x00000000
+
+class XDW_OPEN_MODE(ctypes.Structure):
+    _fields_ = [
+        ("nSize",   ctypes.c_int),
+        ("nOption", ctypes.c_int),   # 0=読み取り専用, 1=読み書き
+    ]
+
+_dll = None
+
+def _get_dll():
+    global _dll
+    if _dll is not None:
+        return _dll
+
+    candidates = [
+        "XDWAPI.dll",
+        r"C:\Program Files\Fuji Xerox\DocuWorks\XDWAPI.dll",
+        r"C:\Program Files (x86)\Fuji Xerox\DocuWorks\XDWAPI.dll",
+        r"C:\Program Files\FujiFilm\DocuWorks\XDWAPI.dll",
+    ]
+    for path in candidates:
+        try:
+            _dll = ctypes.windll.LoadLibrary(path)
+            return _dll
+        except OSError:
+            pass
+
+    print(
+        "[ERROR] XDWAPI.dll が見つかりません。\n"
+        "  以下を確認してください:\n"
+        "  1. DocuWorks 9.1 がインストールされているか\n"
+        "  2. XDWAPI.dll のフォルダを PATH 環境変数に追加するか、\n"
+        "     bundler.py の candidates リストに正確なパスを追加してください。"
+    )
+    sys.exit(1)
+
+
+def _enc(s: str) -> bytes:
+    return s.encode("cp932")
+
+
+def _check(ret: int, func_name: str) -> None:
+    if ret != XDW_E_SUCCESS:
+        raise RuntimeError(f"{func_name} 失敗: エラーコード {ret:#010x}")
+
+
+def create_binder_xdwapi(binder_path: str, doc_paths: list[str]) -> None:
+    """
+    doc_paths にあるファイル（PDF または XDW）を順番にバインダーに追加する。
+    先頭が基準ファイルになるよう呼び出し元で並び替えておくこと。
+    """
+    dll = _get_dll()
+
+    # 既存ファイルを上書きする場合は削除
+    if os.path.exists(binder_path):
+        os.remove(binder_path)
+
+    # 1. 空のバインダーを作成
+    _check(dll.XDW_CreateBinder(_enc(binder_path), None), "XDW_CreateBinder")
+
+    # 2. 書き込みモードで開く
+    handle = ctypes.c_void_p()
+    mode = XDW_OPEN_MODE(nSize=ctypes.sizeof(XDW_OPEN_MODE), nOption=1)
+    _check(
+        dll.XDW_OpenDocumentHandle(_enc(binder_path), ctypes.byref(handle), ctypes.byref(mode)),
+        "XDW_OpenDocumentHandle",
+    )
+
+    # 3. ドキュメントを順番に挿入
+    for i, doc_path in enumerate(doc_paths):
+        _check(
+            dll.XDW_InsertDocumentToBinder(handle, i, _enc(doc_path), None),
+            f"XDW_InsertDocumentToBinder [{os.path.basename(doc_path)}]",
+        )
+
+    # 4. 保存・クローズ
+    _check(dll.XDW_CloseDocumentHandle(handle, None), "XDW_CloseDocumentHandle")
+
+
+# ---------------------------------------------------------------------------
+# CSV / config utilities
+# ---------------------------------------------------------------------------
+
+def load_config(path: str) -> dict:
     with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
-def get_latest_csv(output_dir):
+def get_latest_csv(output_dir: str) -> str:
     csvs = sorted(
         [f for f in os.listdir(output_dir) if f.endswith(".csv")],
         reverse=True,
@@ -33,80 +125,56 @@ def get_latest_csv(output_dir):
     return os.path.join(output_dir, csvs[0])
 
 
-def read_folder_info(csv_path):
+def read_folder_info(csv_path: str) -> dict:
     """CSVから {フォルダ名: {base_file, compare_files[]}} を返す。"""
-    folders = {}
+    folders: dict = {}
     with open(csv_path, encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
             if row.get("status") != "ok":
                 continue
             name = row["folder_name"]
             if name not in folders:
-                folders[name] = {
-                    "base_file": row["base_file"],
-                    "compare_files": [],
-                }
+                folders[name] = {"base_file": row["base_file"], "compare_files": []}
             if row.get("compare_file"):
                 folders[name]["compare_files"].append(row["compare_file"])
     return folders
 
 
-def pdf_to_xdw(pdf_path, xdw_path):
-    """PDFをXDWに変換する。"""
-    import xdwlib
-    doc = xdwlib.Document.create(xdw_path)
-    doc.insert(0, pdf_path)
-    doc.save()
-    doc.close()
+# ---------------------------------------------------------------------------
+# Main logic
+# ---------------------------------------------------------------------------
 
-
-def create_binder(folder_path, base_filename, compare_filenames, binder_dir):
-    import xdwlib
-
+def process_folder(folder_path: str, base_filename: str, compare_filenames: list, binder_dir: str) -> None:
     folder_name = os.path.basename(folder_path)
     binder_path = os.path.join(binder_dir, folder_name + ".xbd")
 
-    # 基準ファイルを先頭にした順序でPDFリストを作成
-    ordered_filenames = [base_filename] + compare_filenames
-    pdf_paths = []
-    for fname in ordered_filenames:
+    # 基準ファイルを先頭に並べる
+    ordered = [base_filename] + compare_filenames
+    doc_paths = []
+    for fname in ordered:
         full = os.path.join(folder_path, fname)
         if os.path.exists(full):
-            pdf_paths.append(full)
+            doc_paths.append(full)
         else:
             print(f"    [警告] ファイルが見つかりません: {fname}")
 
-    if not pdf_paths:
-        print(f"  [スキップ] {folder_name}: PDFが1件も見つかりません")
+    if not doc_paths:
+        print(f"  [スキップ] {folder_name}: 対象ファイルが0件")
         return
 
-    # PDF → XDW 変換（一時ファイル）してバインダーに追加
-    xdw_temps = []
-    try:
-        binder = xdwlib.Binder.create(binder_path)
-        for i, pdf_path in enumerate(pdf_paths):
-            xdw_path = pdf_path.rsplit(".", 1)[0] + "__tmp.xdw"
-            pdf_to_xdw(pdf_path, xdw_path)
-            xdw_temps.append(xdw_path)
-            binder.insert_document(xdw_path, i)
-        binder.save()
-        binder.close()
-        print(f"  作成: {binder_path}  ({len(pdf_paths)}件)")
-    finally:
-        for xdw_path in xdw_temps:
-            if os.path.exists(xdw_path):
-                os.remove(xdw_path)
+    create_binder_xdwapi(binder_path, doc_paths)
+    print(f"  作成: {binder_path}  ({len(doc_paths)} 件)")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="DocuWorks バインダー作成")
     parser.add_argument("--config", default="config.yaml")
-    parser.add_argument("--csv", help="使用するCSVファイル（省略時は最新）")
+    parser.add_argument("--csv",    help="使用するCSVファイル（省略時は最新）")
     parser.add_argument("--folder", help="1フォルダのみ処理（テスト用）")
     args = parser.parse_args()
 
-    config = load_config(args.config)
-    root_dir = config["root_directory"]
+    config    = load_config(args.config)
+    root_dir  = config["root_directory"]
     output_dir = config["output_directory"]
     binder_dir = os.path.join(output_dir, "binders")
     os.makedirs(binder_dir, exist_ok=True)
@@ -128,14 +196,9 @@ def main():
 
         print(f"処理中: {folder_name}")
         try:
-            create_binder(
-                folder_path,
-                info["base_file"],
-                info["compare_files"],
-                binder_dir,
-            )
+            process_folder(folder_path, info["base_file"], info["compare_files"], binder_dir)
         except Exception as e:
-            print(f"  [ERROR] {folder_name}: {e}")
+            print(f"  [ERROR] {e}")
 
     print(f"\n完了。バインダー保存先: {binder_dir}")
 

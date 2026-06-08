@@ -7,7 +7,7 @@ from datetime import datetime
 import yaml
 from tqdm import tqdm
 
-from .extractor import extract_text
+from .extractor import extract_text, setup_tesseract
 from .matcher import compare
 from .reporter import Reporter
 
@@ -134,6 +134,7 @@ def main() -> None:
     args = parser.parse_args()
 
     config = load_config(args.config)
+    setup_tesseract(config.get("tesseract_path"))
 
     if not args.dry_run:
         check_lm_studio(config["lm_studio_url"])

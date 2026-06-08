@@ -3,7 +3,7 @@ base_file_keywords:
   - "重要変更協議"
   - "設計変更"
   - "変更"
-lm_studio_model: "Qwen2.5-7B-Instruct"   # LM Studio の「Model」タブに表示される名前
+lm_studio_model: "Qwen2.5-3B-Instruct"   # LM Studio の「Model」タブに表示される名前
 lm_studio_url: "http://localhost:1234/v1"
 output_directory: "./output"
 output_format: "both"        # csv / json / both

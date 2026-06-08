@@ -27,7 +27,7 @@ PROMPT_TEMPLATE = """あなたは災害復旧事業の書類審査の専門家�
   "change_classification": "一致|部分一致|不一致|判断不可",
   "requires_consultation": true,
   "key_differences": ["差異点1", "差異点2"],
-  "summary": "一言で評価（日本語）"
+  "summary": "【基準文書の変更理由】〇〇。【比較文書の記載】〇〇。【判断根拠】一致/部分一致/不一致と判断した理由を具体的に記載。"
 }}"""
 
 SUMMARY_PROMPT = """以下の文書を3〜5文で簡潔に要約してください。

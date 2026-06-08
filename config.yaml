@@ -1,0 +1,11 @@
+root_directory: "C:/Users/username/disaster-docs"
+base_file_keywords:
+  - "重要変更協議"
+  - "設計変更"
+  - "変更"
+lm_studio_model: "Qwen2.5-7B-Instruct"   # LM Studio の「Model」タブに表示される名前
+lm_studio_url: "http://localhost:1234/v1"
+output_directory: "./output"
+output_format: "both"        # csv / json / both
+text_char_threshold: 100     # OCR判定の閾値（1ページ平均文字数）
+ocr_language: "jpn+jpn_vert"

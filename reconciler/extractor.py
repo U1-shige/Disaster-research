@@ -1,12 +1,19 @@
 import fitz  # PyMuPDF
 
-try:
-    from PIL import Image
-    import pytesseract
-    pytesseract.get_tesseract_version()
-    TESSERACT_AVAILABLE = True
-except Exception:
-    TESSERACT_AVAILABLE = False
+TESSERACT_AVAILABLE = False
+
+
+def setup_tesseract(path=None):
+    global TESSERACT_AVAILABLE
+    try:
+        import pytesseract
+        if path:
+            pytesseract.pytesseract.tesseract_cmd = path
+        pytesseract.get_tesseract_version()
+        TESSERACT_AVAILABLE = True
+    except Exception as e:
+        print(f"[警告] Tesseract が使用できません: {e}")
+        TESSERACT_AVAILABLE = False
 
 
 def extract_text(pdf_path, char_threshold=100, ocr_lang="jpn+jpn_vert"):
@@ -20,6 +27,7 @@ def extract_text(pdf_path, char_threshold=100, ocr_lang="jpn+jpn_vert"):
     if not TESSERACT_AVAILABLE:
         return "\n".join(pages_text).strip(), "ocr_unavailable"
 
+    import pytesseract
     from PIL import Image
     ocr_parts = []
     for page in doc:

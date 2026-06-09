@@ -89,6 +89,8 @@ def create_binder_xdwapi(binder_path: str, doc_paths: list[str]) -> None:
     dll.XDW_OpenDocumentHandleW.argtypes = [ctypes.c_wchar_p,
                                              ctypes.POINTER(ctypes.c_void_p),
                                              ctypes.POINTER(XDW_OPEN_MODE)]
+    dll.XDW_CreateXdwFromImagePdfFile.restype  = ctypes.c_int
+    dll.XDW_CreateXdwFromImagePdfFile.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_void_p]
     dll.XDW_InsertDocumentToBinder.restype  = ctypes.c_int
     dll.XDW_InsertDocumentToBinder.argtypes = [ctypes.c_void_p, ctypes.c_int,
                                                 ctypes.c_char_p, ctypes.c_void_p]
@@ -98,11 +100,8 @@ def create_binder_xdwapi(binder_path: str, doc_paths: list[str]) -> None:
     if os.path.exists(binder_path):
         os.remove(binder_path)
 
-    # 1. 空のバインダーを作成（pInitialData=NULL でデフォルト設定）
-    _check(
-        dll.XDW_CreateBinderW(binder_path, None, None),
-        "XDW_CreateBinderW",
-    )
+    # 1. 空のバインダーを作成
+    _check(dll.XDW_CreateBinderW(binder_path, None, None), "XDW_CreateBinderW")
 
     # 2. 書き込みモードで開く
     handle = ctypes.c_void_p()
@@ -112,12 +111,28 @@ def create_binder_xdwapi(binder_path: str, doc_paths: list[str]) -> None:
         "XDW_OpenDocumentHandleW",
     )
 
-    # 3. ドキュメントを順番に挿入（W版なし→cp932エンコード）
-    for i, doc_path in enumerate(doc_paths):
-        _check(
-            dll.XDW_InsertDocumentToBinder(handle, i, doc_path.encode("cp932"), None),
-            f"XDW_InsertDocumentToBinder [{os.path.basename(doc_path)}]",
-        )
+    # 3. PDF → 一時XDW → バインダーに挿入
+    xdw_temps = []
+    try:
+        for i, pdf_path in enumerate(doc_paths):
+            xdw_path = os.path.splitext(pdf_path)[0] + "__tmp.xdw"
+            _check(
+                dll.XDW_CreateXdwFromImagePdfFile(
+                    pdf_path.encode("cp932"),
+                    xdw_path.encode("cp932"),
+                    None,
+                ),
+                f"XDW_CreateXdwFromImagePdfFile [{os.path.basename(pdf_path)}]",
+            )
+            xdw_temps.append(xdw_path)
+            _check(
+                dll.XDW_InsertDocumentToBinder(handle, i, xdw_path.encode("cp932"), None),
+                f"XDW_InsertDocumentToBinder [{os.path.basename(pdf_path)}]",
+            )
+    finally:
+        for xdw_path in xdw_temps:
+            if os.path.exists(xdw_path):
+                os.remove(xdw_path)
 
     # 4. 保存・クローズ
     _check(dll.XDW_CloseDocumentHandle(handle, None), "XDW_CloseDocumentHandle")

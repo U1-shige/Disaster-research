@@ -182,6 +182,39 @@ def create_binder_xdwapi(binder_path: str, doc_paths: list[str]) -> None:
 # CSV / config utilities
 # ---------------------------------------------------------------------------
 
+def find_base_file(pdf_paths: list[str], keywords: list[str]) -> str | None:
+    """キーワード（長い順）でファイル名を照合し基準ファイルを返す。"""
+    for kw in sorted(keywords, key=len, reverse=True):
+        for p in pdf_paths:
+            if kw in os.path.basename(p):
+                return p
+    return None
+
+
+def scan_root_directory(root_dir: str, keywords: list[str]) -> dict:
+    """root_dir の直下サブフォルダをスキャンして {フォルダ名: {base_file, compare_files[]}} を返す。"""
+    folders: dict = {}
+    for entry in sorted(os.scandir(root_dir), key=lambda e: e.name):
+        if not entry.is_dir():
+            continue
+        pdfs = sorted(
+            os.path.join(entry.path, f)
+            for f in os.listdir(entry.path)
+            if f.lower().endswith(".pdf")
+        )
+        if not pdfs:
+            continue
+        base = find_base_file(pdfs, keywords)
+        if base is None:
+            print(f"  [警告] 基準ファイルが見つかりません（スキップ）: {entry.name}")
+            continue
+        folders[entry.name] = {
+            "base_file":     os.path.basename(base),
+            "compare_files": [os.path.basename(p) for p in pdfs if p != base],
+        }
+    return folders
+
+
 def load_config(path: str) -> dict:
     with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
@@ -242,6 +275,8 @@ def process_folder(folder_path: str, base_filename: str, compare_filenames: list
 def main() -> None:
     parser = argparse.ArgumentParser(description="DocuWorks バインダー作成")
     parser.add_argument("--config", default="config.yaml")
+    parser.add_argument("--scan",   action="store_true",
+                        help="CSVを使わず root_directory を直接スキャン")
     parser.add_argument("--csv",    help="使用するCSVファイル（省略時は最新）")
     parser.add_argument("--folder", help="1フォルダのみ処理（テスト用）")
     args = parser.parse_args()
@@ -252,10 +287,15 @@ def main() -> None:
     binder_dir = os.path.join(output_dir, "binders")
     os.makedirs(binder_dir, exist_ok=True)
 
-    csv_path = args.csv or get_latest_csv(output_dir)
-    print(f"CSV: {csv_path}")
+    if args.scan:
+        keywords = config.get("base_file_keywords", ["設計変更", "変更"])
+        print(f"スキャンモード: {root_dir}")
+        folders = scan_root_directory(root_dir, keywords)
+    else:
+        csv_path = args.csv or get_latest_csv(output_dir)
+        print(f"CSV: {csv_path}")
+        folders = read_folder_info(csv_path)
 
-    folders = read_folder_info(csv_path)
     print(f"{len(folders)} フォルダを処理します\n")
 
     for folder_name, info in folders.items():

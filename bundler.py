@@ -86,7 +86,7 @@ def create_binder_xdwapi(binder_path: str, doc_paths: list[str]) -> None:
     # 関数シグネチャを明示（xdw_api.h より）
     dll.XDW_CreateBinderW.restype       = ctypes.c_int
     dll.XDW_CreateBinderW.argtypes      = [ctypes.c_wchar_p,
-                                            ctypes.POINTER(XDW_BINDER_INITIAL_DATA),
+                                            ctypes.c_void_p,
                                             ctypes.c_void_p]
     dll.XDW_OpenDocumentHandleW.restype  = ctypes.c_int
     dll.XDW_OpenDocumentHandleW.argtypes = [ctypes.c_wchar_p,

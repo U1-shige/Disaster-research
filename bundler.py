@@ -94,9 +94,9 @@ def create_binder_xdwapi(binder_path: str, doc_paths: list[str]) -> None:
                                              ctypes.POINTER(XDW_OPEN_MODE)]
     dll.XDW_CreateXdwFromImageFile.restype  = ctypes.c_int
     dll.XDW_CreateXdwFromImageFile.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_void_p]
-    dll.XDW_InsertDocumentToBinder.restype  = ctypes.c_int
-    dll.XDW_InsertDocumentToBinder.argtypes = [ctypes.c_void_p, ctypes.c_int,
-                                                ctypes.c_char_p, ctypes.c_void_p]
+    dll.XDW_InsertDocumentToBinderW.restype  = ctypes.c_int
+    dll.XDW_InsertDocumentToBinderW.argtypes = [ctypes.c_void_p, ctypes.c_int,
+                                                 ctypes.c_wchar_p, ctypes.c_void_p]
     dll.XDW_CloseDocumentHandle.restype  = ctypes.c_int
     dll.XDW_CloseDocumentHandle.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 
@@ -157,8 +157,8 @@ def create_binder_xdwapi(binder_path: str, doc_paths: list[str]) -> None:
 
             # XDW → バインダーに挿入
             _check(
-                dll.XDW_InsertDocumentToBinder(handle, i, xdw_path.encode("cp932"), None),
-                f"XDW_InsertDocumentToBinder [{os.path.basename(pdf_path)}]",
+                dll.XDW_InsertDocumentToBinderW(handle, i, xdw_path, None),
+                f"XDW_InsertDocumentToBinderW [{os.path.basename(pdf_path)}]",
             )
     finally:
         for p in temp_files:

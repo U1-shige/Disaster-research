@@ -27,9 +27,6 @@ import yaml
 
 XDW_E_SUCCESS = 0x00000000
 
-class XDW_BINDER_INITIAL_DATA(ctypes.Structure):
-    _fields_ = []  # 空の構造体
-
 class XDW_OPEN_MODE(ctypes.Structure):
     _fields_ = [
         ("nSize",   ctypes.c_int),

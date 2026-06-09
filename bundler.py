@@ -101,10 +101,9 @@ def create_binder_xdwapi(binder_path: str, doc_paths: list[str]) -> None:
     if os.path.exists(binder_path):
         os.remove(binder_path)
 
-    # 1. 空のバインダーを作成（W版=Unicode、第2引数=空構造体、第3引数=reserved）
-    initial_data = XDW_BINDER_INITIAL_DATA()
+    # 1. 空のバインダーを作成（pInitialData=NULL でデフォルト設定）
     _check(
-        dll.XDW_CreateBinderW(binder_path, ctypes.byref(initial_data), None),
+        dll.XDW_CreateBinderW(binder_path, None, None),
         "XDW_CreateBinderW",
     )
 

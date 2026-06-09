@@ -192,8 +192,8 @@ def run_byref_test(dll, path_bytes):
 
 
 def clean_insert_test(dll, path_bytes):
-    """InsertとCloseの戻り値を正確に確認するクリーンテスト"""
-    print("\n=== クリーン Insert+Close テスト ===")
+    """2文書挿入・Close・再Openで状態を確認"""
+    print("\n=== クリーン Insert+Close テスト (2文書) ===")
     for p in [BINDER_PATH]:
         if os.path.exists(p): os.remove(p)
 
@@ -212,15 +212,36 @@ def clean_insert_test(dll, path_bytes):
     if ret_open != 0:
         return
 
-    ret_ins = dll.XDW_InsertDocumentToBinder(handle, 1, path_bytes, None)
-    print(f"  Insert(nPage=1): {ret_ins:#010x} {'★' if ret_ins == 0 else ''}")
+    r1 = dll.XDW_InsertDocumentToBinder(handle, 1, path_bytes, None)
+    print(f"  Insert1(nPage=1): {r1:#010x} {'★' if r1 == 0 else ''}")
+
+    r2 = dll.XDW_InsertDocumentToBinder(handle, 2, path_bytes, None)
+    print(f"  Insert2(nPage=2): {r2:#010x} {'★' if r2 == 0 else ''}")
 
     ret_cls = dll.XDW_CloseDocumentHandle(handle, None)
-    print(f"  Close: {ret_cls:#010x} {'OK' if ret_cls == 0 else 'NG ← これが原因'}")
+    print(f"  Close: {ret_cls:#010x} {'OK' if ret_cls == 0 else 'NG ← 原因'}")
 
     sz1 = os.path.getsize(BINDER_PATH) if os.path.exists(BINDER_PATH) else 0
-    grown = sz1 > sz0
-    print(f"  バインダーサイズ: {sz1}B  {'→ 増加OK' if grown else '→ 増加なし（挿入未反映）'}")
+    diff = sz1 - sz0
+    print(f"  バインダーサイズ: {sz1}B (+{diff}B)  {'増加OK' if diff > 0 else '増加なし ← 問題'}")
+
+    # --- 再Openして構造確認 ---
+    handle2 = ctypes.c_void_p()
+    mode2 = _M(nSize=8, nOption=0)   # 0 = 読み取り専用
+    ret2 = dll.XDW_OpenDocumentHandleW(BINDER_PATH, ctypes.byref(handle2), ctypes.byref(mode2))
+    print(f"  再Open(nOpt=0): {ret2:#010x} {'OK' if ret2 == 0 else 'NG'}")
+    if ret2 == 0:
+        # XDW_GetDocumentInformation でページ数を取得
+        dll.XDW_GetDocumentInformation.restype  = ctypes.c_int
+        dll.XDW_GetDocumentInformation.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        # 256バイトの汎用バッファで試す
+        buf = ctypes.create_string_buffer(256)
+        ctypes.cast(buf, ctypes.POINTER(ctypes.c_int))[0] = 256  # nSize
+        ri = dll.XDW_GetDocumentInformation(handle2, buf)
+        nTotalPage = ctypes.cast(buf, ctypes.POINTER(ctypes.c_int))[1]
+        nDoc       = ctypes.cast(buf, ctypes.POINTER(ctypes.c_int))[2]
+        print(f"  GetDocumentInformation: ret={ri:#010x}  totalPage={nTotalPage}  nDoc={nDoc}")
+        dll.XDW_CloseDocumentHandle(handle2, None)
 
 
 if __name__ == "__main__":

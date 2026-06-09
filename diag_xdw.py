@@ -28,124 +28,161 @@ def load_dll():
     sys.exit(1)
 
 
-def check_functions(dll):
-    print("\n=== バインダー関連関数の存在確認 ===")
-    candidates = [
-        # 作成・開く
-        "XDW_CreateBinder",
-        "XDW_CreateBinderW",
-        "XDW_OpenBinder",
-        "XDW_OpenBinderW",
-        "XDW_OpenBinderHandle",
-        "XDW_OpenBinderHandleW",
-        # 挿入・追加
-        "XDW_InsertDocumentToBinder",
-        "XDW_InsertDocumentToBinderW",
-        "XDW_AppendDocumentToBinder",
-        "XDW_AppendDocumentToBinderW",
-        "XDW_AddDocumentToBinder",
-        "XDW_AddDocumentToBinderW",
-        # 情報取得
-        "XDW_GetDocumentInBinder",
-        "XDW_GetDocumentInformation",
-        "XDW_GetDocumentAttributeNumber",
-        # 共通ハンドル
-        "XDW_OpenDocumentHandle",
-        "XDW_OpenDocumentHandleW",
-        "XDW_CloseDocumentHandle",
-        # ページ挿入系
-        "XDW_InsertPageFromImageFile",
-        "XDW_InsertPageFromImageFileW",
-    ]
-    found = []
-    for name in candidates:
-        try:
-            getattr(dll, name)
-            print(f"  [存在] {name}")
-            found.append(name)
-        except AttributeError:
-            print(f"  [なし] {name}")
-    return found
-
-
 class XDW_OPEN_MODE(ctypes.Structure):
     _fields_ = [("nSize", ctypes.c_int), ("nOption", ctypes.c_int)]
 
 
-def test_insert(dll, binder_path: str, xdw_path: str):
-    """既存のXDWファイルをバインダーに挿入してみる"""
-    print(f"\n=== 挿入テスト ===")
-    print(f"  バインダー: {binder_path}")
-    print(f"  挿入するXDW: {xdw_path}")
+def setup_dll_funcs(dll):
+    dll.XDW_CreateBinder.restype      = ctypes.c_int
+    dll.XDW_CreateBinder.argtypes     = [ctypes.c_char_p, ctypes.c_void_p, ctypes.c_void_p]
 
-    if not os.path.exists(xdw_path):
-        print("  [スキップ] XDWファイルが存在しません")
-        return
+    dll.XDW_CreateBinderW.restype     = ctypes.c_int
+    dll.XDW_CreateBinderW.argtypes    = [ctypes.c_wchar_p, ctypes.c_void_p, ctypes.c_void_p]
 
-    # 1. バインダー作成
-    dll.XDW_CreateBinderW.restype  = ctypes.c_int
-    dll.XDW_CreateBinderW.argtypes = [ctypes.c_wchar_p, ctypes.c_void_p, ctypes.c_void_p]
-    if os.path.exists(binder_path):
-        os.remove(binder_path)
-    ret = dll.XDW_CreateBinderW(binder_path, None, None)
-    print(f"  XDW_CreateBinderW: {ret:#010x}")
-    if ret != 0:
-        return
+    dll.XDW_OpenDocumentHandle.restype  = ctypes.c_int
+    dll.XDW_OpenDocumentHandle.argtypes = [
+        ctypes.c_char_p,
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(XDW_OPEN_MODE),
+    ]
 
-    # 2. 開く
     dll.XDW_OpenDocumentHandleW.restype  = ctypes.c_int
     dll.XDW_OpenDocumentHandleW.argtypes = [
         ctypes.c_wchar_p,
         ctypes.POINTER(ctypes.c_void_p),
         ctypes.POINTER(XDW_OPEN_MODE),
     ]
-    handle = ctypes.c_void_p()
-    mode = XDW_OPEN_MODE(nSize=ctypes.sizeof(XDW_OPEN_MODE), nOption=1)
-    ret = dll.XDW_OpenDocumentHandleW(binder_path, ctypes.byref(handle), ctypes.byref(mode))
-    print(f"  XDW_OpenDocumentHandleW: {ret:#010x}  handle={handle.value}")
-    if ret != 0:
-        return
 
-    # 3. 挿入: nPage を 0, -1, 1 で試す
+    dll.XDW_CreateXdwFromImageFile.restype  = ctypes.c_int
+    dll.XDW_CreateXdwFromImageFile.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_void_p]
+
     dll.XDW_InsertDocumentToBinder.restype  = ctypes.c_int
     dll.XDW_InsertDocumentToBinder.argtypes = [
         ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p
     ]
-    path_bytes = xdw_path.encode("cp932")
-    for npage in [0, -1, 1]:
-        ret = dll.XDW_InsertDocumentToBinder(handle, npage, path_bytes, None)
-        print(f"  XDW_InsertDocumentToBinder(nPage={npage}): {ret:#010x}")
-        if ret == 0:
-            print("    → 成功!")
-            break
 
-    # 4. クローズ
     dll.XDW_CloseDocumentHandle.restype  = ctypes.c_int
     dll.XDW_CloseDocumentHandle.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-    ret = dll.XDW_CloseDocumentHandle(handle, None)
-    print(f"  XDW_CloseDocumentHandle: {ret:#010x}")
 
-    if os.path.exists(binder_path):
-        print(f"  バインダーサイズ: {os.path.getsize(binder_path):,} bytes")
-        os.remove(binder_path)
+
+def make_test_tiff(path: str):
+    """1ページ・白・A4 の TIFF を作成"""
+    from PIL import Image
+    img = Image.new("L", (1654, 2339), 255)  # A4 @ 200dpi
+    img.save(path, format="TIFF", compression="tiff_lzw")
+    print(f"  TIFF作成: {path} ({os.path.getsize(path):,} bytes)")
+
+
+def full_pipeline_test(dll):
+    """
+    TIFF → XDW_CreateXdwFromImageFile → XDW_InsertDocumentToBinder
+    の全パイプラインをテストする
+    """
+    print("\n=== パイプライン全体テスト (TIFF→XDW→バインダー挿入) ===")
+    tmp = tempfile.gettempdir()
+    tiff_path   = os.path.join(tmp, "__diag_test__.tif")
+    xdw_path    = os.path.join(tmp, "__diag_test__.xdw")
+    binder_path = os.path.join(tmp, "__diag_binder__.xbd")
+
+    for p in [tiff_path, xdw_path, binder_path]:
+        if os.path.exists(p):
+            os.remove(p)
+
+    # 1. テスト用TIFF作成
+    try:
+        make_test_tiff(tiff_path)
+    except ImportError:
+        print("  [スキップ] Pillow がインストールされていません")
+        return
+
+    # 2. TIFF → XDW
+    ret = dll.XDW_CreateXdwFromImageFile(
+        tiff_path.encode("cp932"),
+        xdw_path.encode("cp932"),
+        None,
+    )
+    print(f"  XDW_CreateXdwFromImageFile: {ret:#010x}", end="")
+    if ret == 0 and os.path.exists(xdw_path):
+        print(f"  → OK ({os.path.getsize(xdw_path):,} bytes)")
+    else:
+        print(f"  → 失敗")
+        return
+
+    # 3. 作成したXDWをOpenDocumentHandleで検証
+    print("\n--- XDWファイルの検証 ---")
+    xdw_handle = ctypes.c_void_p()
+    xdw_mode   = XDW_OPEN_MODE(nSize=ctypes.sizeof(XDW_OPEN_MODE), nOption=0)
+    ret = dll.XDW_OpenDocumentHandle(
+        xdw_path.encode("cp932"),
+        ctypes.byref(xdw_handle),
+        ctypes.byref(xdw_mode),
+    )
+    print(f"  XDW_OpenDocumentHandle (XDWを開く): {ret:#010x}  handle={xdw_handle.value}")
+    if ret == 0:
+        dll.XDW_CloseDocumentHandle(xdw_handle, None)
+        print("  → XDWファイルは有効です")
+    else:
+        print("  → XDWファイルが無効です（作成に問題あり）")
+
+    # 4. バインダー作成 (W版とA版の両方試す)
+    print("\n--- バインダー作成テスト ---")
+    for create_func, open_func, binder_arg, xdw_arg, label in [
+        (
+            lambda p: dll.XDW_CreateBinderW(p, None, None),
+            lambda p, h, m: dll.XDW_OpenDocumentHandleW(p, h, m),
+            binder_path,
+            xdw_path,
+            "W版 (Unicode)",
+        ),
+        (
+            lambda p: dll.XDW_CreateBinder(p.encode("cp932"), None, None),
+            lambda p, h, m: dll.XDW_OpenDocumentHandle(p.encode("cp932"), h, m),
+            binder_path,
+            xdw_path,
+            "A版 (ANSI/cp932)",
+        ),
+    ]:
+        print(f"\n  [{label}]")
+        if os.path.exists(binder_path):
+            os.remove(binder_path)
+
+        ret = create_func(binder_path)
+        print(f"    CreateBinder: {ret:#010x}")
+        if ret != 0:
+            continue
+
+        handle = ctypes.c_void_p()
+        mode   = XDW_OPEN_MODE(nSize=ctypes.sizeof(XDW_OPEN_MODE), nOption=1)
+        ret = open_func(binder_path, ctypes.byref(handle), ctypes.byref(mode))
+        print(f"    OpenDocumentHandle: {ret:#010x}  handle={handle.value}")
+        if ret != 0:
+            continue
+
+        # 挿入テスト
+        for npage in [0, -1]:
+            ret = dll.XDW_InsertDocumentToBinder(
+                handle, npage, xdw_arg.encode("cp932"), None
+            )
+            print(f"    InsertDocumentToBinder(nPage={npage}): {ret:#010x}", end="")
+            if ret == 0:
+                print("  → 成功!")
+            else:
+                print()
+
+        dll.XDW_CloseDocumentHandle(handle, None)
+
+        if os.path.exists(binder_path):
+            sz = os.path.getsize(binder_path)
+            print(f"    バインダーサイズ: {sz:,} bytes (>189 なら挿入成功)")
+            os.remove(binder_path)
+
+    # 後片付け
+    for p in [tiff_path, xdw_path]:
+        if os.path.exists(p):
+            os.remove(p)
 
 
 if __name__ == "__main__":
     dll = load_dll()
-    found = check_functions(dll)
-
-    # テスト用: 既存のXDWファイルを指定してください
-    # 例: C:\Users\85570\Documents\test.xdw
-    test_xdw = ""
-
-    # コマンドライン引数でXDWパスを渡せる
-    if len(sys.argv) > 1:
-        test_xdw = sys.argv[1]
-
-    if test_xdw and os.path.exists(test_xdw):
-        tmp_binder = os.path.join(tempfile.gettempdir(), "__diag_binder__.xbd")
-        test_insert(dll, tmp_binder, test_xdw)
-    else:
-        print("\n[情報] 挿入テストをするには:")
-        print("  python diag_xdw.py  C:\\path\\to\\existing.xdw")
-        print("  (PCにある既存の .xdw ファイルのパスを指定してください)")
+    setup_dll_funcs(dll)
+    full_pipeline_test(dll)

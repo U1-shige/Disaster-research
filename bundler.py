@@ -117,6 +117,7 @@ def create_binder_xdwapi(binder_path: str, doc_paths: list[str]) -> None:
     # 3. PDF → マルチページTIFF → 一時XDW → バインダーに挿入
     tmp_dir = tempfile.gettempdir()
     temp_files = []
+    closed = False
     try:
         for i, pdf_path in enumerate(doc_paths):
             basename = f"__bnd_tmp_{i}"
@@ -164,18 +165,24 @@ def create_binder_xdwapi(binder_path: str, doc_paths: list[str]) -> None:
                 temp_files.append(xdw_alt)
             else:
                 raise RuntimeError(f"XDWファイルが見つかりません: {xdw_path}")
+
             # XDW → バインダーに挿入 (nPage は 1-based: i+1 で順番通り末尾追加)
             _check(
                 dll.XDW_InsertDocumentToBinder(handle, i + 1, actual_xdw.encode("cp932"), None),
                 f"XDW_InsertDocumentToBinder [{os.path.basename(pdf_path)}]",
             )
+
+        # 4. 保存・クローズ（一時ファイル削除より前に必ず実行）
+        _check(dll.XDW_CloseDocumentHandle(handle, None), "XDW_CloseDocumentHandle")
+        closed = True
+        print(f"    [診断] バインダーサイズ: {os.path.getsize(binder_path):,} bytes")
+
     finally:
+        if not closed and handle.value:
+            dll.XDW_CloseDocumentHandle(handle, None)
         for p in temp_files:
             if os.path.exists(p):
                 os.remove(p)
-
-    # 4. 保存・クローズ
-    _check(dll.XDW_CloseDocumentHandle(handle, None), "XDW_CloseDocumentHandle")
 
 
 # ---------------------------------------------------------------------------

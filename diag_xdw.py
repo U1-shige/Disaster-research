@@ -191,6 +191,38 @@ def run_byref_test(dll, path_bytes):
     print(f"  バインダーサイズ: {sz}B")
 
 
+def clean_insert_test(dll, path_bytes):
+    """InsertとCloseの戻り値を正確に確認するクリーンテスト"""
+    print("\n=== クリーン Insert+Close テスト ===")
+    for p in [BINDER_PATH]:
+        if os.path.exists(p): os.remove(p)
+
+    dll.XDW_CreateBinderW(BINDER_PATH, None, None)
+    sz0 = os.path.getsize(BINDER_PATH)
+    print(f"  空バインダー: {sz0}B")
+
+    handle = ctypes.c_void_p()
+
+    class _M(ctypes.Structure):
+        _fields_ = [("nSize", ctypes.c_int), ("nOption", ctypes.c_int)]
+
+    mode = _M(nSize=8, nOption=1)
+    ret_open = dll.XDW_OpenDocumentHandleW(BINDER_PATH, ctypes.byref(handle), ctypes.byref(mode))
+    print(f"  Open(nOpt=1): {ret_open:#010x}  handle={handle.value!r}")
+    if ret_open != 0:
+        return
+
+    ret_ins = dll.XDW_InsertDocumentToBinder(handle, 1, path_bytes, None)
+    print(f"  Insert(nPage=1): {ret_ins:#010x} {'★' if ret_ins == 0 else ''}")
+
+    ret_cls = dll.XDW_CloseDocumentHandle(handle, None)
+    print(f"  Close: {ret_cls:#010x} {'OK' if ret_cls == 0 else 'NG ← これが原因'}")
+
+    sz1 = os.path.getsize(BINDER_PATH) if os.path.exists(BINDER_PATH) else 0
+    grown = sz1 > sz0
+    print(f"  バインダーサイズ: {sz1}B  {'→ 増加OK' if grown else '→ 増加なし（挿入未反映）'}")
+
+
 if __name__ == "__main__":
     dll = load_dll()
     setup(dll)
@@ -202,29 +234,17 @@ if __name__ == "__main__":
         print("  Pillowなし → スキップ")
         ok_tiff = False
 
-    print("\n--- XDW作成 (BMP) ---")
-    try:
-        ok_bmp = prepare_xdw(dll, use_bmp=True)
-    except Exception as e:
-        print(f"  BMP失敗: {e}")
-        ok_bmp = False
-
-    # テスト対象ファイル
-    if ok_tiff:
-        xdw_to_test = XDW_PATH
-    elif ok_bmp:
-        xdw_to_test = XDW_PATH
-    else:
+    if not ok_tiff:
         print("XDWファイルを作成できません")
         sys.exit(1)
 
-    path_bytes = xdw_to_test.encode("cp932")
+    path_bytes = XDW_PATH.encode("cp932")
 
     # 1. nOption × struct_size マトリックス
     run_matrix(dll, path_bytes)
 
-    # 2. byref テスト
-    run_byref_test(dll, path_bytes)
+    # 2. クリーンなInsert+Closeテスト（Close戻り値確認）
+    clean_insert_test(dll, path_bytes)
 
     # 後片付け
     for p in [TIFF_PATH, BMP_PATH, XDW_PATH, BINDER_PATH]:

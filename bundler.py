@@ -74,31 +74,40 @@ def _check(ret: int, func_name: str) -> None:
 
 
 def create_binder_xdwapi(binder_path: str, doc_paths: list[str]) -> None:
-    """
-    doc_paths にあるファイル（PDF または XDW）を順番にバインダーに追加する。
-    先頭が基準ファイルになるよう呼び出し元で並び替えておくこと。
-    """
     dll = _get_dll()
 
-    # 既存ファイルを上書きする場合は削除
+    # XDWAPI は絶対パスが必要
+    binder_path = os.path.abspath(binder_path)
+    doc_paths   = [os.path.abspath(p) for p in doc_paths]
+
+    # 引数・戻り値の型を明示
+    dll.XDW_CreateBinder.restype        = ctypes.c_int
+    dll.XDW_CreateBinder.argtypes       = [ctypes.c_wchar_p, ctypes.c_void_p]
+    dll.XDW_OpenDocumentHandle.restype  = ctypes.c_int
+    dll.XDW_OpenDocumentHandle.argtypes = [ctypes.c_wchar_p, ctypes.c_void_p, ctypes.c_void_p]
+    dll.XDW_InsertDocumentToBinder.restype  = ctypes.c_int
+    dll.XDW_InsertDocumentToBinder.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p, ctypes.c_void_p]
+    dll.XDW_CloseDocumentHandle.restype  = ctypes.c_int
+    dll.XDW_CloseDocumentHandle.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+
     if os.path.exists(binder_path):
         os.remove(binder_path)
 
-    # 1. 空のバインダーを作成（Unicode文字列で渡す）
-    _check(dll.XDW_CreateBinder(_wstr(binder_path), None), "XDW_CreateBinder")
+    # 1. 空のバインダーを作成
+    _check(dll.XDW_CreateBinder(binder_path, None), "XDW_CreateBinder")
 
     # 2. 書き込みモードで開く
     handle = ctypes.c_void_p()
     mode = XDW_OPEN_MODE(nSize=ctypes.sizeof(XDW_OPEN_MODE), nOption=1)
     _check(
-        dll.XDW_OpenDocumentHandle(_wstr(binder_path), ctypes.byref(handle), ctypes.byref(mode)),
+        dll.XDW_OpenDocumentHandle(binder_path, ctypes.byref(handle), ctypes.byref(mode)),
         "XDW_OpenDocumentHandle",
     )
 
     # 3. ドキュメントを順番に挿入
     for i, doc_path in enumerate(doc_paths):
         _check(
-            dll.XDW_InsertDocumentToBinder(handle, i, _wstr(doc_path), None),
+            dll.XDW_InsertDocumentToBinder(handle, i, doc_path, None),
             f"XDW_InsertDocumentToBinder [{os.path.basename(doc_path)}]",
         )
 

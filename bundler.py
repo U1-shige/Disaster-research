@@ -145,31 +145,31 @@ def create_binder_xdwapi(binder_path: str, doc_paths: list[str]) -> None:
                 append_images=pages_img[1:],
             )
 
-            # TIFF → XDW (拡張子なしで渡す: 関数が .xdw を付加する場合に対応)
-            xdw_base = os.path.join(tmp_dir, basename)  # 拡張子なし
+            # TIFF → XDW (.xdw 拡張子付きで渡す必要あり)
             _check(
                 dll.XDW_CreateXdwFromImageFile(
                     tiff_path.encode("cp932"),
-                    xdw_base.encode("cp932"),
+                    xdw_path.encode("cp932"),
                     None,
                 ),
                 f"XDW_CreateXdwFromImageFile [{os.path.basename(pdf_path)}]",
             )
 
-            # 実際に作成されたファイルを特定（関数が .xdw を付加する場合 or しない場合）
+            # 実際に作成されたファイルを特定（念のため両方確認）
+            xdw_alt = xdw_path + ".xdw"  # 関数が .xdw をさらに付加するケース
             if os.path.exists(xdw_path):
                 actual_xdw = xdw_path
-            elif os.path.exists(xdw_base):
-                actual_xdw = xdw_base
-                temp_files.append(xdw_base)
+            elif os.path.exists(xdw_alt):
+                actual_xdw = xdw_alt
+                temp_files.append(xdw_alt)
             else:
-                raise RuntimeError(f"XDWファイルが見つかりません。期待パス: {xdw_path}")
+                raise RuntimeError(f"XDWファイルが見つかりません: {xdw_path}")
             print(f"    [診断] XDW作成OK: {actual_xdw} ({os.path.getsize(actual_xdw):,} bytes)")
-            print(f"    [診断] handle.value={handle.value:#018x}, nPage={i}")
+            print(f"    [診断] handle.value={handle.value!r}, nPage={i}")
 
-            # XDW → バインダーに挿入
+            # XDW → バインダーに挿入 (nPage は 0-based, -1 で末尾追加)
             _check(
-                dll.XDW_InsertDocumentToBinder(handle, i, actual_xdw.encode("cp932"), None),
+                dll.XDW_InsertDocumentToBinder(handle, -1, actual_xdw.encode("cp932"), None),
                 f"XDW_InsertDocumentToBinder [{os.path.basename(pdf_path)}]",
             )
     finally:

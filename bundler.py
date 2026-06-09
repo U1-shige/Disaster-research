@@ -27,10 +27,13 @@ import yaml
 
 XDW_E_SUCCESS = 0x00000000
 
+class XDW_BINDER_INITIAL_DATA(ctypes.Structure):
+    _fields_ = []  # 空の構造体
+
 class XDW_OPEN_MODE(ctypes.Structure):
     _fields_ = [
         ("nSize",   ctypes.c_int),
-        ("nOption", ctypes.c_int),   # 0=読み取り専用, 1=読み書き
+        ("nOption", ctypes.c_int),
     ]
 
 _dll = None
@@ -80,34 +83,43 @@ def create_binder_xdwapi(binder_path: str, doc_paths: list[str]) -> None:
     binder_path = os.path.abspath(binder_path)
     doc_paths   = [os.path.abspath(p) for p in doc_paths]
 
-    # 引数・戻り値の型を明示
-    dll.XDW_CreateBinder.restype        = ctypes.c_int
-    dll.XDW_CreateBinder.argtypes       = [ctypes.c_wchar_p, ctypes.c_void_p]
-    dll.XDW_OpenDocumentHandle.restype  = ctypes.c_int
-    dll.XDW_OpenDocumentHandle.argtypes = [ctypes.c_wchar_p, ctypes.c_void_p, ctypes.c_void_p]
+    # 関数シグネチャを明示（xdw_api.h より）
+    dll.XDW_CreateBinderW.restype       = ctypes.c_int
+    dll.XDW_CreateBinderW.argtypes      = [ctypes.c_wchar_p,
+                                            ctypes.POINTER(XDW_BINDER_INITIAL_DATA),
+                                            ctypes.c_void_p]
+    dll.XDW_OpenDocumentHandleW.restype  = ctypes.c_int
+    dll.XDW_OpenDocumentHandleW.argtypes = [ctypes.c_wchar_p,
+                                             ctypes.POINTER(ctypes.c_void_p),
+                                             ctypes.POINTER(XDW_OPEN_MODE)]
     dll.XDW_InsertDocumentToBinder.restype  = ctypes.c_int
-    dll.XDW_InsertDocumentToBinder.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p, ctypes.c_void_p]
+    dll.XDW_InsertDocumentToBinder.argtypes = [ctypes.c_void_p, ctypes.c_int,
+                                                ctypes.c_char_p, ctypes.c_void_p]
     dll.XDW_CloseDocumentHandle.restype  = ctypes.c_int
     dll.XDW_CloseDocumentHandle.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 
     if os.path.exists(binder_path):
         os.remove(binder_path)
 
-    # 1. 空のバインダーを作成
-    _check(dll.XDW_CreateBinder(binder_path, None), "XDW_CreateBinder")
+    # 1. 空のバインダーを作成（W版=Unicode、第2引数=空構造体、第3引数=reserved）
+    initial_data = XDW_BINDER_INITIAL_DATA()
+    _check(
+        dll.XDW_CreateBinderW(binder_path, ctypes.byref(initial_data), None),
+        "XDW_CreateBinderW",
+    )
 
     # 2. 書き込みモードで開く
     handle = ctypes.c_void_p()
     mode = XDW_OPEN_MODE(nSize=ctypes.sizeof(XDW_OPEN_MODE), nOption=1)
     _check(
-        dll.XDW_OpenDocumentHandle(binder_path, ctypes.byref(handle), ctypes.byref(mode)),
-        "XDW_OpenDocumentHandle",
+        dll.XDW_OpenDocumentHandleW(binder_path, ctypes.byref(handle), ctypes.byref(mode)),
+        "XDW_OpenDocumentHandleW",
     )
 
-    # 3. ドキュメントを順番に挿入
+    # 3. ドキュメントを順番に挿入（W版なし→cp932エンコード）
     for i, doc_path in enumerate(doc_paths):
         _check(
-            dll.XDW_InsertDocumentToBinder(handle, i, doc_path, None),
+            dll.XDW_InsertDocumentToBinder(handle, i, doc_path.encode("cp932"), None),
             f"XDW_InsertDocumentToBinder [{os.path.basename(doc_path)}]",
         )
 

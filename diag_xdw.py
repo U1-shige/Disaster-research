@@ -146,8 +146,8 @@ def run_matrix(dll, path_bytes):
 
 
 def run_byref_test(dll, path_bytes):
-    """handle を byref で渡す (二重ポインタ) テスト"""
-    print("\n=== byref(handle) テスト ===")
+    """handle の渡し方バリエーションテスト"""
+    print("\n=== handle 渡し方テスト ===")
     if os.path.exists(BINDER_PATH): os.remove(BINDER_PATH)
     dll.XDW_CreateBinderW(BINDER_PATH, None, None)
     ret_open, handle = open_binder(dll, BINDER_PATH, 1, 8)
@@ -155,16 +155,32 @@ def run_byref_test(dll, path_bytes):
         print(f"  Open失敗: {ret_open:#010x}")
         return
 
-    # 通常: handle (値渡し)
-    ret = dll.XDW_InsertDocumentToBinder(handle, 0, path_bytes, None)
-    print(f"  handle (値渡し)   : {ret:#010x}")
+    print(f"  handle.value = {handle.value!r}")
 
-    # byref: &handle (ポインタ渡し)
+    # A: handle (c_void_p オブジェクト)
+    dll.XDW_InsertDocumentToBinder.argtypes = [
+        ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p
+    ]
+    for pg in [0, 1, -1]:
+        r = dll.XDW_InsertDocumentToBinder(handle, pg, path_bytes, None)
+        ok = "★成功★" if r == 0 else f"{r:#010x}"
+        print(f"  handle(obj) nPage={pg:2d}: {ok}")
+        if r == 0: break
+
+    # B: handle.value (生int) — argtypes は c_void_p のまま
+    for pg in [0, 1, -1]:
+        r = dll.XDW_InsertDocumentToBinder(handle.value, pg, path_bytes, None)
+        ok = "★成功★" if r == 0 else f"{r:#010x}"
+        print(f"  handle(int) nPage={pg:2d}: {ok}")
+        if r == 0: break
+
+    # C: byref(handle) — 二重ポインタ
     dll.XDW_InsertDocumentToBinder.argtypes = [
         ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p
     ]
-    ret2 = dll.XDW_InsertDocumentToBinder(ctypes.byref(handle), 0, path_bytes, None)
-    print(f"  byref(handle)      : {ret2:#010x}")
+    r3 = dll.XDW_InsertDocumentToBinder(ctypes.byref(handle), 0, path_bytes, None)
+    ok = "★成功★" if r3 == 0 else f"{r3:#010x}"
+    print(f"  byref(handle) nPage= 0: {ok}")
 
     # 元に戻す
     dll.XDW_InsertDocumentToBinder.argtypes = [

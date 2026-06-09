@@ -3,7 +3,7 @@ DocuWorks バインダー作成スクリプト (XDWAPI直接呼び出し版)
 
 必要なもの:
   - DocuWorks 9.1 がPCにインストールされていること (XDWAPI.DLL)
-  - 追加パッケージ不要 (ctypes は Python 標準ライブラリ)
+  - pymupdf / Pillow（reconciler と共通、追加インストール不要）
 
 使い方:
   python bundler.py                    # 全フォルダ処理
@@ -17,7 +17,10 @@ import ctypes
 import ctypes.wintypes
 import os
 import sys
+import tempfile
 
+import fitz          # PyMuPDF
+from PIL import Image
 import yaml
 
 
@@ -89,8 +92,8 @@ def create_binder_xdwapi(binder_path: str, doc_paths: list[str]) -> None:
     dll.XDW_OpenDocumentHandleW.argtypes = [ctypes.c_wchar_p,
                                              ctypes.POINTER(ctypes.c_void_p),
                                              ctypes.POINTER(XDW_OPEN_MODE)]
-    dll.XDW_CreateXdwFromImagePdfFile.restype  = ctypes.c_int
-    dll.XDW_CreateXdwFromImagePdfFile.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_void_p]
+    dll.XDW_CreateXdwFromImageFile.restype  = ctypes.c_int
+    dll.XDW_CreateXdwFromImageFile.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_void_p]
     dll.XDW_InsertDocumentToBinder.restype  = ctypes.c_int
     dll.XDW_InsertDocumentToBinder.argtypes = [ctypes.c_void_p, ctypes.c_int,
                                                 ctypes.c_char_p, ctypes.c_void_p]
@@ -111,28 +114,56 @@ def create_binder_xdwapi(binder_path: str, doc_paths: list[str]) -> None:
         "XDW_OpenDocumentHandleW",
     )
 
-    # 3. PDF → 一時XDW → バインダーに挿入
-    xdw_temps = []
+    # 3. PDF → マルチページTIFF → 一時XDW → バインダーに挿入
+    tmp_dir = tempfile.gettempdir()
+    temp_files = []
     try:
         for i, pdf_path in enumerate(doc_paths):
-            xdw_path = os.path.splitext(pdf_path)[0] + "__tmp.xdw"
+            basename = f"__bnd_tmp_{i}"
+            tiff_path = os.path.join(tmp_dir, basename + ".tif")
+            xdw_path  = os.path.join(tmp_dir, basename + ".xdw")
+            temp_files.extend([tiff_path, xdw_path])
+
+            # PDF → マルチページTIFF (200dpi, グレースケール)
+            pdf_doc = fitz.open(pdf_path)
+            pages_img = []
+            for page in pdf_doc:
+                pix = page.get_pixmap(dpi=200, colorspace=fitz.csGRAY)
+                img = Image.frombytes("L", [pix.width, pix.height], pix.samples)
+                pages_img.append(img)
+            pdf_doc.close()
+
+            if not pages_img:
+                print(f"    [警告] ページが空です: {os.path.basename(pdf_path)}")
+                continue
+
+            pages_img[0].save(
+                tiff_path,
+                format="TIFF",
+                compression="tiff_deflate",
+                save_all=True,
+                append_images=pages_img[1:],
+            )
+
+            # TIFF → XDW
             _check(
-                dll.XDW_CreateXdwFromImagePdfFile(
-                    pdf_path.encode("cp932"),
+                dll.XDW_CreateXdwFromImageFile(
+                    tiff_path.encode("cp932"),
                     xdw_path.encode("cp932"),
                     None,
                 ),
-                f"XDW_CreateXdwFromImagePdfFile [{os.path.basename(pdf_path)}]",
+                f"XDW_CreateXdwFromImageFile [{os.path.basename(pdf_path)}]",
             )
-            xdw_temps.append(xdw_path)
+
+            # XDW → バインダーに挿入
             _check(
                 dll.XDW_InsertDocumentToBinder(handle, i, xdw_path.encode("cp932"), None),
                 f"XDW_InsertDocumentToBinder [{os.path.basename(pdf_path)}]",
             )
     finally:
-        for xdw_path in xdw_temps:
-            if os.path.exists(xdw_path):
-                os.remove(xdw_path)
+        for p in temp_files:
+            if os.path.exists(p):
+                os.remove(p)
 
     # 4. 保存・クローズ
     _check(dll.XDW_CloseDocumentHandle(handle, None), "XDW_CloseDocumentHandle")

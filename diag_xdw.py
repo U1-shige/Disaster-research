@@ -39,8 +39,14 @@ class XDW_OPEN_MODE_2(ctypes.Structure):
 
 
 def make_test_tiff(path: str):
-    from PIL import Image
+    from PIL import Image, ImageDraw
     img = Image.new("L", (1654, 2339), 255)
+    draw = ImageDraw.Draw(img)
+    # 真っ白だと空ページ扱いされる可能性があるため黒矩形を描画
+    draw.rectangle([100, 100, 1554, 500], fill=0)
+    draw.rectangle([100, 600, 800, 2200], fill=80)
+    for y in range(700, 2100, 40):
+        draw.line([(120, y), (780, y)], fill=0, width=2)
     img.save(path, format="TIFF", compression="tiff_lzw")
 
 
@@ -192,13 +198,17 @@ def run_byref_test(dll, path_bytes):
 
 
 def clean_insert_test(dll, path_bytes):
-    """2文書挿入・Close・再Openで状態を確認"""
+    """2文書挿入・companion確認・再Open・GetDocumentInformation"""
     print("\n=== クリーン Insert+Close テスト (2文書) ===")
+
+    before_files = set(os.listdir(tmp))
+
     for p in [BINDER_PATH]:
         if os.path.exists(p): os.remove(p)
 
     dll.XDW_CreateBinderW(BINDER_PATH, None, None)
     sz0 = os.path.getsize(BINDER_PATH)
+    mtime0 = os.path.getmtime(BINDER_PATH)
     print(f"  空バインダー: {sz0}B")
 
     handle = ctypes.c_void_p()
@@ -222,25 +232,39 @@ def clean_insert_test(dll, path_bytes):
     print(f"  Close: {ret_cls:#010x} {'OK' if ret_cls == 0 else 'NG ← 原因'}")
 
     sz1 = os.path.getsize(BINDER_PATH) if os.path.exists(BINDER_PATH) else 0
+    mtime1 = os.path.getmtime(BINDER_PATH)
     diff = sz1 - sz0
-    print(f"  バインダーサイズ: {sz1}B (+{diff}B)  {'増加OK' if diff > 0 else '増加なし ← 問題'}")
+    print(f"  サイズ: {sz1}B (+{diff}B)  {'増加OK' if diff > 0 else '増加なし'}")
+    print(f"  mtime変化: {'あり（書き込み確認）' if mtime1 != mtime0 else 'なし ← ファイル未更新'}")
 
-    # --- 再Openして構造確認 ---
+    # companion ファイル/フォルダ確認
+    after_files = set(os.listdir(tmp))
+    new_files = sorted(after_files - before_files)
+    print(f"  tempに新規ファイル: {new_files if new_files else 'なし'}")
+    base = os.path.splitext(BINDER_PATH)[0]
+    for cand in [base, base + "_files", BINDER_PATH + "_files"]:
+        if os.path.exists(cand):
+            sub = os.listdir(cand) if os.path.isdir(cand) else []
+            print(f"  コンパニオン発見: {cand}  ({len(sub)} ファイル)")
+            for f in sub[:5]:
+                print(f"    - {f}")
+
+    # 再Open + GetDocumentInformation
     handle2 = ctypes.c_void_p()
-    mode2 = _M(nSize=8, nOption=0)   # 0 = 読み取り専用
+    mode2 = _M(nSize=8, nOption=0)
     ret2 = dll.XDW_OpenDocumentHandleW(BINDER_PATH, ctypes.byref(handle2), ctypes.byref(mode2))
     print(f"  再Open(nOpt=0): {ret2:#010x} {'OK' if ret2 == 0 else 'NG'}")
     if ret2 == 0:
-        # XDW_GetDocumentInformation でページ数を取得
-        dll.XDW_GetDocumentInformation.restype  = ctypes.c_int
-        dll.XDW_GetDocumentInformation.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-        # 256バイトの汎用バッファで試す
-        buf = ctypes.create_string_buffer(256)
-        ctypes.cast(buf, ctypes.POINTER(ctypes.c_int))[0] = 256  # nSize
-        ri = dll.XDW_GetDocumentInformation(handle2, buf)
-        nTotalPage = ctypes.cast(buf, ctypes.POINTER(ctypes.c_int))[1]
-        nDoc       = ctypes.cast(buf, ctypes.POINTER(ctypes.c_int))[2]
-        print(f"  GetDocumentInformation: ret={ri:#010x}  totalPage={nTotalPage}  nDoc={nDoc}")
+        try:
+            dll.XDW_GetDocumentInformation.restype  = ctypes.c_int
+            dll.XDW_GetDocumentInformation.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+            buf = ctypes.create_string_buffer(256)
+            ctypes.cast(buf, ctypes.POINTER(ctypes.c_int))[0] = 256
+            ri = dll.XDW_GetDocumentInformation(handle2, buf)
+            ints = ctypes.cast(buf, ctypes.POINTER(ctypes.c_int))
+            print(f"  GetDocInfo: ret={ri:#010x}  [1]={ints[1]}  [2]={ints[2]}  [3]={ints[3]}")
+        except Exception as e:
+            print(f"  GetDocInfo 例外: {e}")
         dll.XDW_CloseDocumentHandle(handle2, None)
 
 

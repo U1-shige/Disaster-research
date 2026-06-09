@@ -164,12 +164,9 @@ def create_binder_xdwapi(binder_path: str, doc_paths: list[str]) -> None:
                 temp_files.append(xdw_alt)
             else:
                 raise RuntimeError(f"XDWファイルが見つかりません: {xdw_path}")
-            print(f"    [診断] XDW作成OK: {actual_xdw} ({os.path.getsize(actual_xdw):,} bytes)")
-            print(f"    [診断] handle.value={handle.value!r}, nPage={i}")
-
-            # XDW → バインダーに挿入 (nPage は 0-based, -1 で末尾追加)
+            # XDW → バインダーに挿入 (nPage は 1-based: i+1 で順番通り末尾追加)
             _check(
-                dll.XDW_InsertDocumentToBinder(handle, -1, actual_xdw.encode("cp932"), None),
+                dll.XDW_InsertDocumentToBinder(handle, i + 1, actual_xdw.encode("cp932"), None),
                 f"XDW_InsertDocumentToBinder [{os.path.basename(pdf_path)}]",
             )
     finally:

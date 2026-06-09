@@ -94,9 +94,9 @@ def create_binder_xdwapi(binder_path: str, doc_paths: list[str]) -> None:
                                              ctypes.POINTER(XDW_OPEN_MODE)]
     dll.XDW_CreateXdwFromImageFile.restype  = ctypes.c_int
     dll.XDW_CreateXdwFromImageFile.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_void_p]
-    dll.XDW_InsertDocumentToBinderW.restype  = ctypes.c_int
-    dll.XDW_InsertDocumentToBinderW.argtypes = [ctypes.c_void_p, ctypes.c_int,
-                                                 ctypes.c_wchar_p, ctypes.c_void_p]
+    dll.XDW_InsertDocumentToBinder.restype  = ctypes.c_int
+    dll.XDW_InsertDocumentToBinder.argtypes = [ctypes.c_void_p, ctypes.c_int,
+                                                ctypes.c_char_p, ctypes.c_void_p]
     dll.XDW_CloseDocumentHandle.restype  = ctypes.c_int
     dll.XDW_CloseDocumentHandle.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 
@@ -145,20 +145,32 @@ def create_binder_xdwapi(binder_path: str, doc_paths: list[str]) -> None:
                 append_images=pages_img[1:],
             )
 
-            # TIFF → XDW
+            # TIFF → XDW (拡張子なしで渡す: 関数が .xdw を付加する場合に対応)
+            xdw_base = os.path.join(tmp_dir, basename)  # 拡張子なし
             _check(
                 dll.XDW_CreateXdwFromImageFile(
                     tiff_path.encode("cp932"),
-                    xdw_path.encode("cp932"),
+                    xdw_base.encode("cp932"),
                     None,
                 ),
                 f"XDW_CreateXdwFromImageFile [{os.path.basename(pdf_path)}]",
             )
 
+            # 実際に作成されたファイルを特定（関数が .xdw を付加する場合 or しない場合）
+            if os.path.exists(xdw_path):
+                actual_xdw = xdw_path
+            elif os.path.exists(xdw_base):
+                actual_xdw = xdw_base
+                temp_files.append(xdw_base)
+            else:
+                raise RuntimeError(f"XDWファイルが見つかりません。期待パス: {xdw_path}")
+            print(f"    [診断] XDW作成OK: {actual_xdw} ({os.path.getsize(actual_xdw):,} bytes)")
+            print(f"    [診断] handle.value={handle.value:#018x}, nPage={i}")
+
             # XDW → バインダーに挿入
             _check(
-                dll.XDW_InsertDocumentToBinderW(handle, i, xdw_path, None),
-                f"XDW_InsertDocumentToBinderW [{os.path.basename(pdf_path)}]",
+                dll.XDW_InsertDocumentToBinder(handle, i, actual_xdw.encode("cp932"), None),
+                f"XDW_InsertDocumentToBinder [{os.path.basename(pdf_path)}]",
             )
     finally:
         for p in temp_files:

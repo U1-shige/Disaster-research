@@ -1,3 +1,5 @@
 pdf2image
 Pillow
 openpyxl
+pdfplumber
+pytesseract

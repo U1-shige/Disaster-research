@@ -1,14 +1,21 @@
 """
 PDF 前処理モジュール
 PDFからテキストを抽出してPower Automateエージェントに渡せる形に整形する。
+OCRテキストレイヤーをPDFに書き込んで上書き保存する機能も提供する。
 
-優先順位:
+優先順位（テキスト抽出）:
   1. pdfplumber でネイティブテキスト抽出（テキストPDF）
   2. Tesseract OCR にフォールバック（スキャンPDF）
 
 使い方（CLI）:
+  # テキスト抽出のみ
   python pdf_preprocessor.py 設計変更_001.pdf
-  python pdf_preprocessor.py 設計変更_001.pdf --lang jpn+eng --out result.txt
+
+  # OCRしてPDF上書き（検索可能PDFに変換）
+  python pdf_preprocessor.py 設計変更_001.pdf --ocr-overwrite
+
+  # フォルダ内の全PDFを一括OCR上書き
+  python pdf_preprocessor.py --ocr-dir ./pdfs --lang jpn
 """
 
 import argparse
@@ -143,16 +150,120 @@ def preprocess_pair(
     }
 
 
+def ocr_overwrite(pdf_path: str, lang: str = "jpn", force: bool = False) -> None:
+    """
+    OCRテキストレイヤーをPDFに書き込んで上書き保存する（検索可能PDFに変換）。
+
+    ocrmypdf を使用する。既にテキストレイヤーがある場合はスキップ。
+    force=True で強制的に再OCRする。
+
+    Args:
+        pdf_path: 対象PDFファイルのパス
+        lang: Tesseract言語コード（例: "jpn", "jpn+eng"）
+        force: True の場合、既存テキストレイヤーがあっても再OCRする
+    """
+    try:
+        import ocrmypdf
+    except ImportError:
+        raise RuntimeError(
+            "ocrmypdf がインストールされていません。\n"
+            "pip install ocrmypdf を実行してください。"
+        )
+
+    path = Path(pdf_path)
+    if not path.exists():
+        raise FileNotFoundError(f"ファイルが見つかりません: {pdf_path}")
+
+    print(f"[OCR上書き] {path.name}", file=sys.stderr)
+
+    extra_args = {}
+    if force:
+        extra_args["force_ocr"] = True
+    else:
+        extra_args["skip_text"] = True  # テキスト済みページをスキップ
+
+    result = ocrmypdf.ocr(
+        input_file=str(path),
+        output_file=str(path),  # 同じパスを指定して上書き
+        language=lang,
+        **extra_args,
+    )
+
+    print(f"  → 完了: {result}", file=sys.stderr)
+
+
+def ocr_overwrite_dir(
+    dir_path: str, lang: str = "jpn", force: bool = False, recursive: bool = True
+) -> dict[str, str]:
+    """
+    フォルダ内のPDFを一括でOCR上書きする。
+
+    Returns:
+        { ファイルパス: "成功" | "スキップ" | "エラー: ..." }
+    """
+    root = Path(dir_path)
+    pattern = "**/*.pdf" if recursive else "*.pdf"
+    pdf_files = sorted(root.glob(pattern))
+
+    if not pdf_files:
+        print(f"[警告] PDFファイルが見つかりません: {dir_path}", file=sys.stderr)
+        return {}
+
+    results: dict[str, str] = {}
+    for pdf in pdf_files:
+        try:
+            ocr_overwrite(str(pdf), lang=lang, force=force)
+            results[str(pdf)] = "成功"
+        except Exception as e:
+            msg = f"エラー: {e}"
+            print(f"  → {msg}", file=sys.stderr)
+            results[str(pdf)] = msg
+
+    success = sum(1 for v in results.values() if v == "成功")
+    print(
+        f"\n[完了] {success}/{len(pdf_files)} 件 OCR上書き成功",
+        file=sys.stderr,
+    )
+    return results
+
+
 def main():
-    parser = argparse.ArgumentParser(description="PDFをテキストに変換（Tesseract OCR対応）")
-    parser.add_argument("pdf", help="対象PDFファイルのパス")
+    parser = argparse.ArgumentParser(description="PDFをテキストに変換 / OCR上書き（Tesseract対応）")
+    parser.add_argument("pdf", nargs="?", help="対象PDFファイルのパス")
     parser.add_argument("--lang", default="jpn", help="Tesseract言語コード（例: jpn, jpn+eng）")
     parser.add_argument("--dpi", type=int, default=300, help="OCR解像度（デフォルト: 300）")
     parser.add_argument("--out", help="テキスト出力先ファイル（省略時は標準出力）")
+    parser.add_argument(
+        "--ocr-overwrite",
+        action="store_true",
+        help="OCRテキストレイヤーをPDFに書き込んで上書きする",
+    )
+    parser.add_argument(
+        "--ocr-dir",
+        help="フォルダ内の全PDFを一括OCR上書きする",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="既存テキストレイヤーがあっても強制的に再OCRする",
+    )
     args = parser.parse_args()
 
-    text = preprocess_pdf(args.pdf, lang=args.lang, dpi=args.dpi)
+    # 一括OCR上書きモード
+    if args.ocr_dir:
+        ocr_overwrite_dir(args.ocr_dir, lang=args.lang, force=args.force)
+        return
 
+    if not args.pdf:
+        parser.error("pdf または --ocr-dir のどちらかを指定してください")
+
+    # 単体OCR上書きモード
+    if args.ocr_overwrite:
+        ocr_overwrite(args.pdf, lang=args.lang, force=args.force)
+        return
+
+    # テキスト抽出モード（デフォルト）
+    text = preprocess_pdf(args.pdf, lang=args.lang, dpi=args.dpi)
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")
         print(f"[完了] {args.out} に保存しました", file=sys.stderr)

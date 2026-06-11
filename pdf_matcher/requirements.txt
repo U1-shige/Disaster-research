@@ -3,3 +3,4 @@ Pillow
 openpyxl
 pdfplumber
 pytesseract
+ocrmypdf
